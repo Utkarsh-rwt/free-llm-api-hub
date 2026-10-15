@@ -107,9 +107,10 @@ test('freshness is said in words and by icon shape, not only by colour and a tit
 test('the explorer announces how many providers are shown, in a permanent live region', () => {
   const html = readFileSync(new URL('../site/index.html', import.meta.url), 'utf8');
   const js = readFileSync(new URL('../site/explorer.js', import.meta.url), 'utf8');
-  assert.match(html, /<p id="count" class="sr-only" role="status" aria-live="polite" aria-atomic="true"><\/p>/, 'the region exists in the page from the start');
+  assert.match(html, /<p id="count" class="filter-count" role="status" aria-live="polite" aria-atomic="true"><\/p>/, 'the visible region exists near the filters from the start');
   assert.doesNotMatch(html, /id="stats" aria-live/, 'the stat tiles are written once at load and must not announce on every paint');
-  assert.match(js, /getElementById\('count'\)\.textContent = rows\.length \? `\$\{rows\.length\} of \$\{DATA\.length\} providers shown`/, 'every render writes the count');
+  assert.match(js, /getElementById\('count'\)\.textContent = rows\.length === DATA\.length\s+\? `\$\{rows\.length\} providers`\s+: `Showing \$\{rows\.length\} of \$\{DATA\.length\} providers`/, 'every render writes a distinct filtered or unfiltered count');
+  assert.doesNotMatch(js, /getElementById\('count'\)[^\n]*No providers match/, 'the live count must not repeat the empty-state message');
   assert.match(js, /STATUS_WORD = \{ fresh: 'fresh', due: 'due for re-check', stale: 'stale' \}/, 'the oldest-verification tile says its status in words');
 });
 
