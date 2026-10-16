@@ -1531,6 +1531,21 @@ const validateAfter = (mutate) => {
   return exitOk(['scripts/validate.mjs', fixture]);
 };
 
+// A `generated` after today in UTC is what a contributor in a time zone ahead of UTC writes at the end of their day (2026-10-16 when it is still
+// 2026-10-15 in UTC). It must fail, with the way to write the day.
+test('validate: the dates of the dataset are UTC days and none is in the future', () => {
+  const data = JSON.parse(readFileSync(DATA, 'utf8'));
+  const withToday = (today, file = DATA) => { try { execFileSync(process.execPath, ['scripts/validate.mjs', file], { cwd: ROOT, stdio: 'pipe', env: { ...process.env, VALIDATE_TODAY: today } }); return ''; } catch (e) { return `${e.stdout}${e.stderr}`; } };
+  assert.equal(withToday(data.generated), '', 'generated is today: valid');
+  assert.equal(withToday('2999-01-01'), '', 'generated in the past: valid');
+  const day = new Date(Date.parse(`${data.generated}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  assert.match(withToday(day), new RegExp(`generated \\(${data.generated}\\) is after today in UTC \\(${day}\\); write the dates of the dataset in UTC`), 'generated the day after "today" fails and says how to write it');
+  assert.equal(validateAfter((d) => { d.generated = '2999-01-01'; }), false, 'with the real clock, a generated far in the future fails');
+  const later = tmpFile('providers.json'); writeFileSync(later, JSON.stringify({ ...data, generated: '2026-10-16' }));
+  assert.match(withToday('2026-10-15', later), /after today in UTC \(2026-10-15\)/, 'the contributor in Asia: 2026-10-16 when it is 2026-10-15 in UTC');
+  assert.match(readFileSync(join(ROOT, 'CONTRIBUTING.md'), 'utf8'), /Dates are UTC days/, 'CONTRIBUTING says it');
+});
+
 test('model tier thresholds: edges, tier 0 versus no source, and the minimum votes', () => {
   assert.deepEqual(MODEL_TIER_THRESHOLDS, [[4, 1450], [3, 1400], [2, 1330], [1, 1250]]);
   assert.equal(tierForRating(1450), 4);
@@ -2125,7 +2140,7 @@ test('data_policy lot 4: the 13 providers that say they do not train were read f
   for (const p of data.providers.filter((q) => q.data_policy && q.data_policy.trains_on_prompts !== false)) {
     // rows that say it may train were read for the plan later (lots 2, 3, 5 and the correction of the absence claims): true where the
     // clause names the free users or free usage (AssemblyAI, Voyage AI), false where it does not
-    const READ = { assemblyai: true, 'voyage-ai': true, elevenlabs: false, cartesia: false, 'retell-ai': false, deepgram: false };
+    const READ = { assemblyai: true, 'voyage-ai': true, elevenlabs: false, cartesia: false, 'retell-ai': false, deepgram: false, 'arli-ai': false };
     if (p.slug in READ) assert.equal(p.data_policy.plan_named, READ[p.slug], `${p.slug}: plan_named as read`);
     else assert.equal(p.data_policy.plan_named, undefined, `${p.slug}: not read for the plan yet, so no value is written`);
   }
@@ -2147,9 +2162,9 @@ test('data_policy lot 5: at least 25 of 68, Deepgram trains by its terms with an
   for (const dp of [dg, rw]) { assert.equal(dp.checked, '2026-10-15'); assert.ok(dp.quote.length <= 400 && dp.note.length <= 300); }
 });
 
-test('data_policy lot 6: 26 of 68, AI21 says it does not train, with the conditions of its own sentence', () => {
+test('data_policy lot 6: at least 26 of 68, AI21 says it does not train, with the conditions of its own sentence', () => {
   const data = JSON.parse(readFileSync(DATA, 'utf8'));
-  assert.equal(data.providers.filter((p) => p.data_policy).length, 26, 'the count of covered providers');
+  assert.ok(data.providers.filter((p) => p.data_policy).length >= 26, 'lot 6 raised the covered providers to 26; later rows only add');
   const dp = data.providers.find((p) => p.slug === 'ai21').data_policy;
   assert.equal(dp.trains_on_prompts, false); assert.equal(dp.plan_named, false); assert.equal(dp.checked, '2026-10-15');
   assert.equal(dp.source, 'https://www.ai21.com/terms-policies/privacy-policy/', 'the final address, not the one that redirects');
@@ -2167,6 +2182,19 @@ test('correction of the absence claims: no note says the page names no plan unle
   assert.equal(dpOf('voyage-ai').plan_named, true);
   assert.match(dpOf('voyage-ai').note, /credits or tokens for free usage of the Service may be automatically void/, 'the passage about free usage is in the note');
   assert.match(readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8'), /^- \*\*Corrección:\*\*/m, 'the correction is visible in the changelog');
+});
+
+test('data_policy: Arli AI, from a contributor, states retention only: trains stays not confirmed, the quote is literal and has its register entry', () => {
+  const data = JSON.parse(readFileSync(DATA, 'utf8'));
+  assert.equal(data.providers.filter((p) => p.data_policy).length, 27, 'the count of covered providers');
+  const dp = data.providers.find((p) => p.slug === 'arli-ai').data_policy;
+  assert.equal(dp.trains_on_prompts, null, 'the policy says nothing about training: not stated is not no');
+  assert.match(dp.retention, /processed transiently and immediately discarded/); assert.equal(dp.plan_named, false);
+  assert.equal(dp.quote, 'We do not log, store, or have access to the content of your prompts or the outputs generated by the models', 'literal: no full stop the page does not have');
+  const registry = JSON.parse(readFileSync(join(ROOT, 'data/quotes.json'), 'utf8'));
+  assert.ok(registry.entries.some((e) => e.slug === 'arli-ai' && e.kind === 'sentence' && e.text === dp.quote));
+  const md = readFileSync(join(ROOT, 'collections/no-training.md'), 'utf8');
+  assert.ok(!md.includes('Arli AI'), 'a provider with trains_on_prompts null is not in the no-training collection');
 });
 
 test('mobile: the two long text cells stack their label above the text at 720px', () => {
